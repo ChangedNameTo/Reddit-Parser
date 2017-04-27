@@ -2,12 +2,51 @@
 # psycopg2 for the PG stuff
 import praw
 import psycopg2
+import sys
+import subprocess
 
 # Imports my secret variables cause you can't have my passwords
 from secret import client_id, client_secret, password, username, user_agent
 
-# Connects to the db I spun up for this training
-conn = psycopg2.connect("dbname=will_reddit user=postgres host=athena")
+# DB connection thingy
+path_db_info_script = '/praw/reddit-training/get_db_info.pl'
+
+# Connects to the db I spun up for this training. Thanks Harrison!
+host = 'athena'
+port = '5432'
+name = 'will_reddit'
+user = 'postgres'
+
+if(not host):
+    s_fatal("Failed to retrieve db hostname!")
+    sys.exit(-1)
+
+if(not port):
+    s_fatal("Failed to retrieve db port!")
+    sys.exit(-1)
+
+if(not name):
+    s_fatal("Failed to retrieve db name!")
+    sys.exit(-1)
+
+if(not user):
+    s_fatal("Failed to retrieve db user!")
+    sys.exit(-1)
+
+host = host.rstrip()
+port = port.rstrip()
+name = name.rstrip()
+user = user.rstrip()
+
+print("Connecting with database information: host=%s, port=%s, name=%s, user=%s" % (
+    host, port, name, user))
+
+conn = psycopg2.connect(
+    host=host,
+    port=port,
+    database=name,
+    user=user
+)
 
 # Sets up the reddit connection
 reddit = praw.Reddit(
@@ -24,6 +63,9 @@ reddit = praw.Reddit(
 def start():
     for submission in reddit.front.hot():
         parse_post(submission)
+
+    # Commits the changes to the db and closes the connection
+    conn.commit()
     conn.close()
 
 # This function parses posts. It grabs the data from posts and puts them into
@@ -57,7 +99,8 @@ def handle_author(author):
         grab_user.execute("SELECT user_id FROM redditors WHERE username = %s;", (author))
         user_id = grab_user.fetchone()
         grab_user.close()
-        return user_id
+
+        return user_id[0]
     else:
         # Makes a new redditor since they aren't there
         return create_redditor(author)
@@ -78,7 +121,7 @@ def create_redditor(author):
     new_id = grab_id.fetchone()
     grab_id.close()
 
-    return new_id
+    return new_id[0]
 
 def handle_subreddit(subreddit):
     # Queries my db to see if a subreddit already exists. If it does, pulls it's
@@ -86,6 +129,7 @@ def handle_subreddit(subreddit):
     subreddit_select = conn.cursor()
     subreddit_select.execute("SELECT name FROM subreddits;")
     sub_list = subreddit_select.fetchall()
+    subreddit_select.close()
 
     # Are they there?
     if subreddit in sub_list:
@@ -94,11 +138,13 @@ def handle_subreddit(subreddit):
         grab_sub.execute("SELECT subreddit_id FROM subreddits WHERE name = %s;", (subreddit))
         sub_id = grab_sub.fetchone()
         grab_sub.close()
-        return sub_id
+
+        return sub_id[0]
     else:
         # Makes a new subreddit since they aren't there
         return create_subreddit(subreddit)
 
+# Creates new subreddits to be cataloged
 def create_subreddit(subreddit):
     # Inserts the new subreddit into the table
     new_subreddit = conn.cursor()
@@ -111,15 +157,16 @@ def create_subreddit(subreddit):
     new_id = grab_id.fetchone()
     grab_id.close()
 
-    return new_id
+    return new_id[0]
 
+# Converts the reddit epoch timestamps into a PG friendly timestamp
 def date_helper(epoch_date):
     date = conn.cursor()
     date.execute("SELECT TIMESTAMP WITH TIME ZONE 'epoch' + %s * INTERVAL '1 second';", [epoch_date])
     converted = date.fetchone()
     date.close()
 
-    return converted
+    return converted[0]
 
 # Fires the start function
 start()
