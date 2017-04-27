@@ -4,6 +4,7 @@ import praw
 import psycopg2
 import sys
 import subprocess
+import threading
 
 # Imports my secret variables cause you can't have my passwords
 from secret import client_id, client_secret, password, username, user_agent
@@ -57,44 +58,53 @@ reddit = praw.Reddit(
     username=username
 )
 
+# Sets up the lock so that pg connections don't get terminated by each other
+parse_post_lock       = threading.RLock()
+handle_author_lock    = threading.RLock()
+create_redditor_lock  = threading.RLock()
+handle_subreddit_lock = threading.RLock()
+create_subreddit_lock = threading.RLock()
+date_helper_lock      = threading.RLock()
+
+threads = []
 
 # Begin the comment parsing. The subreddits that it parses through are on my
 # front page. It grabs the top 25 posts on my front page.
 def start():
-    # Visual progress counter
-    post_num = 1
+    thread_handler(reddit.front.hot(), 'hot front page')
+    thread_handler(reddit.subreddit('all').hot(), 'hot /r/all')
+    thread_handler(reddit.front.rising(), 'rising front page')
+    thread_handler(reddit.subreddit('all').rising(), 'rising /r/all')
 
-    # Parses the hot page
-    for submission in reddit.front.hot():
-        print("Parsing hot front page post #" + str(post_num))
+    # Closes the connection after all threads finish
+    for x in threads:
+        x.join()
+
+
+def thread_handler(submissions, type_string):
+    # Creates my thread
+    t = threading.Thread(target=subreddit_parse, args=(submissions, type_string))
+
+    # Starts the thread
+    t.start()
+    print("Starting: " + type_string)
+
+    # Appends it for later joining
+    threads.append(t)
+
+def subreddit_parse(submissions, type_string):
+    post_num = 1
+    for submission in submissions:
+        print("Parsing " + type_string + " post #" + str(post_num))
         parse_post(submission)
         post_num = post_num+1
 
-    post_num = 1
-    for submission in reddit.subreddit('all').hot():
-        print("Parsing hot /r/all post #" + str(post_num))
-        parse_post(submission)
-        post_num = post_num+1
-
-    # Get's things off of rising as well
-    post_num = 1
-    for submission in reddit.front.rising():
-        print("Parsing rising front page post #" + str(post_num))
-        parse_post(submission)
-        post_num = post_num+1
-
-    post_num = 1
-    for submission in reddit.subreddit('all').rising():
-        print("Parsing rising /r/all post #" + str(post_num))
-        parse_post(submission)
-        post_num = post_num+1
-
-    # Closes the connection
-    conn.close()
 
 # This function parses posts. It grabs the data from posts and puts them into
 # the db. Fires off the handler for the poster and comments sections as well.
 def parse_post(submission):
+    parse_post_lock.acquire()
+
     # Inserts the submission data into the database. This grabs 100 posts, updates a tracker as a result
     author = handle_author(submission.author)
     subreddit = handle_subreddit(submission.subreddit)
@@ -110,13 +120,17 @@ def parse_post(submission):
         conn.rollback()
 
     new_post.close()
+    parse_post_lock.release()
 
 # Queries my db to see if a redditor already exists. If he does, pulls his
 # data. If they don't, I add them to the db, then return the object
 def handle_author(author):
+    handle_author_lock.acquire()
+
     user_select = conn.cursor()
     user_select.execute("SELECT username FROM redditors;", ())
     username_list = user_select.fetchall()
+    user_select.close()
 
     # Are they there?
     if author in username_list:
@@ -126,12 +140,16 @@ def handle_author(author):
         user_id = grab_user.fetchone()
         grab_user.close()
 
+        handle_author_lock.release()
         return user_id[0]
     else:
         # Makes a new redditor since they aren't there
+        handle_author_lock.release()
         return create_redditor(author)
 
 def create_redditor(author):
+    create_redditor_lock.acquire()
+
     # Grabs a redditor instance
     redditor = reddit.redditor(author.name)
 
@@ -147,9 +165,12 @@ def create_redditor(author):
     new_id = grab_id.fetchone()
     grab_id.close()
 
+    create_redditor_lock.release()
     return new_id[0]
 
 def handle_subreddit(subreddit):
+    handle_subreddit_lock.acquire()
+
     # Queries my db to see if a subreddit already exists. If it does, pulls it's
     # data. If it doesn't, I add it to the db, then return the object
     subreddit_select = conn.cursor()
@@ -165,13 +186,17 @@ def handle_subreddit(subreddit):
         sub_id = grab_sub.fetchone()
         grab_sub.close()
 
+        handle_subreddit_lock.release()
         return sub_id[0]
     else:
         # Makes a new subreddit since they aren't there
+        handle_subreddit_lock.release()
         return create_subreddit(subreddit)
 
 # Creates new subreddits to be cataloged
 def create_subreddit(subreddit):
+    create_subreddit_lock.acquire()
+
     # Inserts the new subreddit into the table
     new_subreddit = conn.cursor()
     new_subreddit.execute("INSERT INTO subreddits (name) VALUES (%s);", [subreddit.name])
@@ -183,15 +208,19 @@ def create_subreddit(subreddit):
     new_id = grab_id.fetchone()
     grab_id.close()
 
+    create_subreddit_lock.release()
     return new_id[0]
 
 # Converts the reddit epoch timestamps into a PG friendly timestamp
 def date_helper(epoch_date):
+    date_helper_lock.acquire()
+
     date = conn.cursor()
     date.execute("SELECT TIMESTAMP WITH TIME ZONE 'epoch' + %s * INTERVAL '1 second';", [epoch_date])
     converted = date.fetchone()
     date.close()
 
+    date_helper_lock.release()
     return converted[0]
 
 # Fires the start function
