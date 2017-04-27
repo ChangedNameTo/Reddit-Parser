@@ -39,16 +39,6 @@ port = port.rstrip()
 name = name.rstrip()
 user = user.rstrip()
 
-print("Connecting with database information: host=%s, port=%s, name=%s, user=%s" % (
-    host, port, name, user))
-
-conn = psycopg2.connect(
-    host=host,
-    port=port,
-    database=name,
-    user=user
-)
-
 # Sets up the reddit connection
 reddit = praw.Reddit(
     client_id=client_id,
@@ -58,6 +48,13 @@ reddit = praw.Reddit(
     username=username
 )
 
+conn = psycopg2.connect(
+    host=host,
+    port=port,
+    database=name,
+    user=user
+)
+
 # Sets up the lock so that pg connections don't get terminated by each other
 parse_post_lock       = threading.RLock()
 handle_author_lock    = threading.RLock()
@@ -65,6 +62,8 @@ create_redditor_lock  = threading.RLock()
 handle_subreddit_lock = threading.RLock()
 create_subreddit_lock = threading.RLock()
 date_helper_lock      = threading.RLock()
+
+threadLocal = threading.local()
 
 threads = []
 
@@ -89,6 +88,11 @@ def thread_handler(submissions, type_string):
     t.start()
     print("Starting: " + type_string)
 
+    # Connections are thread safe I think
+    print("Connecting with database information (%s): host=%s, port=%s, name=%s, user=%s" % (
+        type_string, host, port, name, user))
+
+
     # Appends it for later joining
     threads.append(t)
 
@@ -103,13 +107,13 @@ def subreddit_parse(submissions, type_string):
 # This function parses posts. It grabs the data from posts and puts them into
 # the db. Fires off the handler for the poster and comments sections as well.
 def parse_post(submission):
-    parse_post_lock.acquire()
-
     # Inserts the submission data into the database. This grabs 100 posts, updates a tracker as a result
     author = handle_author(submission.author)
     subreddit = handle_subreddit(submission.subreddit)
 
     # Inserts the submission data into the db
+    parse_post_lock.acquire()
+
     new_post = conn.cursor()
     try:
         new_post.execute("INSERT INTO posts (score, title, shortlink, gilded, submitter, subreddit) VALUES (%s, %s, %s, %s, %s, %s);",
