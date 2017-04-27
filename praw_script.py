@@ -61,35 +61,61 @@ reddit = praw.Reddit(
 # Begin the comment parsing. The subreddits that it parses through are on my
 # front page. It grabs the top 25 posts on my front page.
 def start():
-    for submission in reddit.front.hot():
-        parse_post(submission)
+    # Visual progress counter
+    post_num = 1
 
-    # Commits the changes to the db and closes the connection
-    conn.commit()
+    # Parses the hot page
+    for submission in reddit.front.hot():
+        print("Parsing hot front page post #" + str(post_num))
+        parse_post(submission)
+        post_num = post_num+1
+
+    post_num = 1
+    for submission in reddit.subreddit('all').hot():
+        print("Parsing hot /r/all post #" + str(post_num))
+        parse_post(submission)
+        post_num = post_num+1
+
+    # Get's things off of rising as well
+    post_num = 1
+    for submission in reddit.front.rising():
+        print("Parsing rising front page post #" + str(post_num))
+        parse_post(submission)
+        post_num = post_num+1
+
+    post_num = 1
+    for submission in reddit.subreddit('all').rising():
+        print("Parsing rising /r/all post #" + str(post_num))
+        parse_post(submission)
+        post_num = post_num+1
+
+    # Closes the connection
     conn.close()
 
 # This function parses posts. It grabs the data from posts and puts them into
 # the db. Fires off the handler for the poster and comments sections as well.
-
-
 def parse_post(submission):
-    # Inserts the submission data into the database
+    # Inserts the submission data into the database. This grabs 100 posts, updates a tracker as a result
     author = handle_author(submission.author)
     subreddit = handle_subreddit(submission.subreddit)
 
     # Inserts the submission data into the db
     new_post = conn.cursor()
-    new_post.execute("INSERT INTO posts (score, title, shortlink, gilded, submitter, subreddit) VALUES (%s, %s, %s, %s, %s, %s);",
-                     (submission.score, submission.title, submission.shortlink, submission.gilded, author, subreddit))
+    try:
+        new_post.execute("INSERT INTO posts (score, title, shortlink, gilded, submitter, subreddit) VALUES (%s, %s, %s, %s, %s, %s);",
+                         (submission.score, submission.title, submission.shortlink, submission.gilded, author, subreddit))
+        conn.commit()
+    except:
+        print("DB insertion error, probably a duplicate value, fairly common. Rolls back the error")
+        conn.rollback()
 
-    # Parse comments for a post
-    # for comment in submission.comments:
+    new_post.close()
 
+# Queries my db to see if a redditor already exists. If he does, pulls his
+# data. If they don't, I add them to the db, then return the object
 def handle_author(author):
-    # Queries my db to see if a redditor already exists. If he does, pulls his
-    # data. If they don't, I add them to the db, then return the object
     user_select = conn.cursor()
-    user_select.execute("SELECT username FROM redditors;")
+    user_select.execute("SELECT username FROM redditors;", ())
     username_list = user_select.fetchall()
 
     # Are they there?
