@@ -1,0 +1,46 @@
+# This command orders all of the top posts by score. This just shows off the DB stuff
+
+SELECT p.score as Score,
+       p.title as Title,
+       p.gilded as Gilded,
+       s.name as Subreddit,
+       r.username as Username
+  FROM posts p
+  JOIN redditors r ON r.user_id = p.submitter
+  JOIN subreddits s ON s.subreddit_id = p.subreddit;
+
+
+# This command shows how gold can affect/be affected by scores.
+
+(
+    SELECT avg(score)
+      FROM posts
+     WHERE gilded > 0
+)
+UNION ALL
+(
+    SELECT avg(score)
+      FROM posts
+     WHERE gilded=0
+)
+
+# Grabs the highest post counts of all users
+
+  SELECT count(p.*) as Post_Count,
+         r.username as Username,
+         r.link_karma
+    FROM posts p
+    JOIN redditors r ON r.user_id = p.submitter
+GROUP BY username
+ORDER BY Post_Count DESC;
+
+# Grabs the highest post counts by subreddit
+
+  SELECT count(p.*) as Post_Count,
+         s.name
+    FROM posts p
+    JOIN subreddits s ON s.subreddit_id = p.subreddit
+GROUP BY name
+ORDER BY Post_Count DESC;
+
+

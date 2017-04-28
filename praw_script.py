@@ -157,10 +157,14 @@ def create_redditor(author):
     # Grabs a redditor instance
     redditor = reddit.redditor(author.name)
 
-    # Inserts the new redditor into the table
+    # Inserts the new redditor into the table. I added try catch because of 404's
     new_redditor = conn.cursor()
-    new_redditor.execute("INSERT INTO redditors (username, comment_karma, link_karma, creation_date) VALUES ( %s, %s, %s, %s);",
-                         (author.name, redditor.comment_karma, redditor.link_karma, date_helper(redditor.created)))
+    try:
+        new_redditor.execute("INSERT INTO redditors (username, comment_karma, link_karma, creation_date) VALUES ( %s, %s, %s, %s);",
+                             (author.name, redditor.comment_karma, redditor.link_karma, date_helper(redditor.created)))
+    except:
+        print("I just caught a 404. Fix ur servers Mr. Reddit")
+
     new_redditor.close()
 
     # Grabs the most recent id to return
@@ -203,7 +207,7 @@ def create_subreddit(subreddit):
 
     # Inserts the new subreddit into the table
     new_subreddit = conn.cursor()
-    new_subreddit.execute("INSERT INTO subreddits (name) VALUES (%s);", [subreddit.name])
+    new_subreddit.execute("INSERT INTO subreddits (name) VALUES (%s);", [subreddit.display_name])
     new_subreddit.close()
 
     # Grabs the most recent id to return
