@@ -5,9 +5,9 @@ SELECT p.score as Score,
        p.gilded as Gilded,
        s.name as Subreddit,
        r.username as Username
-  FROM posts p
-  JOIN redditors r ON r.user_id = p.submitter
-  JOIN subreddits s ON s.subreddit_id = p.subreddit;
+       FROM posts p
+       JOIN redditors r ON r.user_id = p.submitter
+       JOIN subreddits s ON s.subreddit_id = p.subreddit;
 
 
 # This command shows how gold can affect/be affected by scores.
